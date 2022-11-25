@@ -1,0 +1,75 @@
+stages:
+  - maven-build
+  - maven-test
+  - docker-build
+  - docker-deploy
+
+maven-build:
+  image: maven:latest
+  stage: maven-build
+  script: mvn clean install
+  artifacts:
+    paths:
+      - target/*.jar
+
+maven-test:
+  image: maven:latest
+  stage: maven-test
+  script: mvn test
+  artifacts:
+    paths:
+      - target/*.jar
+
+docker-build:
+  stage: docker-build
+
+  image: docker:stable
+
+  services:
+    - name: docker:dind
+      alias: thedockerhost
+
+  variables:
+    # Tell docker CLI how to talk to Docker daemon; see
+    # https://docs.gitlab.com/ee/ci/docker/using_docker_build.html#use-docker-in-docker-executor
+    DOCKER_HOST: tcp://thedockerhost:2375/
+    # Use the overlayfs driver for improved performance:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+
+  only:
+    - main
+  before_script:
+    - echo -n $CI_REGISTRY_TOKEN | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - docker build --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+
+docker-deploy:
+  stage: docker-deploy
+
+  image: docker:stable
+
+  services:
+    - name: docker:dind
+      alias: thedockerhost
+
+  variables:
+    # Tell docker CLI how to talk to Docker daemon; see
+    # https://docs.gitlab.com/ee/ci/docker/using_docker_build.html#use-docker-in-docker-executor
+    DOCKER_HOST: tcp://thedockerhost:2375/
+    # Use the overlayfs driver for improved performance:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+
+  only:
+    - main
+
+  before_script:
+    - echo -n ${CI_REGISTRY_TOKEN} | docker login -u "${CI_REGISTRY_USER}" --password-stdin ${CI_REGISTRY}
+
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:back-end2
+    - docker push $CI_REGISTRY_IMAGE:back-end2
+
